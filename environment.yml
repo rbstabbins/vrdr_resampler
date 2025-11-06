@@ -1,0 +1,16 @@
+name: vrdr_resampler
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python  
+  - gdal
+  - geopandas
+  - matplotlib
+  - numpy
+  - pandas
+  - pdr
+  - pyproj
+  - rasterio
+  - scipy
+  - spectral
