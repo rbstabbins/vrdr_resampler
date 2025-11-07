@@ -21,8 +21,20 @@ from pyproj import CRS
 import rasterio as rio
 from rasterio.transform import Affine
 from scipy.interpolate import interp1d
-import spectral.io.envi as envi
 import time
+
+# Product type string identifiers
+# Product identifiers are prefixed with the instrument identifier,
+# e.g. for CaSSIS 'c', the I/F Cube becomes 'cifcub'
+IFCUB_STR = 'ifcub' # I/F Cube
+SPCUB_STR = 'spcub' # Spectral Parameter (or Summary Product) Cube
+# Browse products indicate the population over which the stretch parameter
+# statistics have been evaluated.
+# Browse product type IF is attached as suffix to the string identifier,
+# e.g. for CaSSIS NPB tile-stretched browse product becomes 'cbtnpb'
+BT_STR = 'bt' # Browse product 'Tile' stretched
+BQ_STR = 'bq' # Browse product 'Quadrant' stretched
+BG_STR = 'bg' # Browse product 'Global' stretched
 
 
 def get_quadrant_dirs(vrdr_path: Path) -> List[Path]:
@@ -145,7 +157,6 @@ def plot_channel_profiles(
     ax.set_title(f'{instrument} Channel Profiles')
     ax.legend()
     ax.grid()
-    fig.show()
     return fig, ax
 
 def unpack_channel_profiles(
@@ -235,14 +246,13 @@ def resample_cube(
     # set nan values back to no_data value
     band_cube = np.nan_to_num(band_cube, nan=no_data)
 
-    return np.array(band_cube)
+    return np.array(band_cube).astype(np.float32)
 
 def stretch_image(image: np.ndarray, 
                   no_data: float,
                   lower_pct: float=0.01, 
                   upper_pct: float=99.95,
-                  stretch_min: float | None = None,
-                  stretch_max: float | None = None
+                  st_params: Tuple[float, float]|None = None,
                   ) -> Tuple[np.ndarray, Tuple[float, float]]:
     """Apply a linear stretch to the image based on the given percentiles.
     
@@ -261,30 +271,25 @@ def stretch_image(image: np.ndarray,
     image = image.astype(float)
     stretch_img = image.copy()
     stretch_img[image == no_data] = np.nan
-    if stretch_min is None:
-        lower = np.nanpercentile(stretch_img, lower_pct)
+    if st_params is None:
+        lower, upper = np.nanpercentile(stretch_img, (lower_pct, upper_pct))  
     else:
-        lower = stretch_min
-    if stretch_max is None:
-        upper = np.nanpercentile(stretch_img, upper_pct)
-    else:
-        upper = stretch_max
+        lower, upper = st_params      
+
     stretched = (stretch_img - lower) / (upper - lower)
     stretched = np.clip(stretched, 0.0, 1.0)
 
     # convert to 8-bit
-    stretched = (np.round(stretched * 254)).astype(np.uint8)
+    stretched = (np.rint(stretched * 254))
     stretched[np.isnan(stretch_img)] = 255
     
-    return stretched, (lower, upper)
+    return stretched.astype(np.uint8), (lower, upper)
 
 def stretch_cube(
         cube: np.ndarray,
         no_data: float,
-        lower_pct: float = 0.01,
-        upper_pct: float = 99.95,
-        stretch_min: np.ndarray | None = None,
-        stretch_max: np.ndarray | None = None
+        pct_params: Tuple[float, float]=(0.01, 99.95),
+        st_params: np.ndarray | None = None
         ) -> np.ndarray:
     """Apply contrast stretch to each band in a cube.
 
@@ -299,31 +304,25 @@ def stretch_cube(
     :return: Contrast-stretched image cube (3D numpy array)
     :rtype: np.ndarray
     """
-    # stcub = []
-    # stcub_params = []
-    # for i, band_img in enumerate(cube):
-    #     if stretch_min is None:
-    #         band_min = None
-    #     else:
-    #         band_min = stretch_min[i]
-    #     if stretch_max is None:
-    #         band_max = None
-    #     else:
-    #         band_max = stretch_max[i]
-    #     band_stretch, stretch_params = stretch_image(
-    #         band_img, no_data, lower_pct, upper_pct, band_min, band_max)
-    #     stcub.append(band_stretch)
-    #     stcub_params.append(stretch_params)
 
-    mask = (stcube == no_data)
-    cstcub = np.where(mask, np.nan, stcube)
-    stretch_params = np.nanpercentile(cube, [0.01, 99.95], axis=(1,2))
-    cstcub2 = cifcub - stretch_params[0][:, np.newaxis, np.newaxis] / (stretch_params[1][:, np.newaxis, np.newaxis] - stretch_params[0][:, np.newaxis, np.newaxis])
-    cstcub2 = np.clip(cstcub2, 0, 1)
-    cstcub2 = (np.round(cstcub2 * 254)).astype(np.uint8)
-    cstcub2[mask] = 255
+    stcub = cube.astype(float)
+    # mask no_data values
+    mask = (stcub == no_data)
+    stcub[mask] = np.nan
 
-    return np.array(stcub), stcub_params
+    # get stretch parameters
+    if st_params is None:
+        st_params = np.nanpercentile(stcub, pct_params, axis=(1,2))
+
+    # apply stretch
+    lower = st_params[0][:, np.newaxis, np.newaxis]
+    upper = st_params[1][:, np.newaxis, np.newaxis]
+    stcub = (stcub - lower) / (upper - lower)
+    stcub = np.clip(stcub, 0, 1)
+    stcub = (np.rint(stcub * 254))
+    stcub[mask] = 255
+
+    return np.array(stcub).astype(np.uint8), st_params
 
 def spcub_from_ifcub(
         cube: np.ndarray,
@@ -351,14 +350,15 @@ def spcub_from_ifcub(
         sp_data, sp_bands = cassis_sp(sp_id, cube, no_data)
         sp_cube.append(sp_data)
         sp_band_list.append(sp_bands[0])
-    sp_cube = np.stack(sp_cube, axis=2)
+    sp_cube = np.stack(sp_cube, axis=2).astype(np.float32)
     return sp_cube, sp_band_list
 
-def write_cube_envi_hdr(
+def write_ifcub_envi_hdr(
         band_list: list, 
         band_cwls: list,
         no_data: float,
         default_bands: list,
+        instrument_id: str,
         lbl_path: Path, 
         out_dir: Path
         ) -> Path:
@@ -370,6 +370,10 @@ def write_cube_envi_hdr(
     :type band_cwls: list
     :param no_data: No-data value for the bands
     :type no_data: float
+    :param default_bands: List of default bands for display
+    :type default_bands: list
+    :param instrument_id: Instrument identifier string
+    :type instrument_id: str
     :param lbl_path: Path to the VRDR .lbl file
     :type lbl_path: Path
     :param out_dir: Output directory for the ENVI header
@@ -403,11 +407,12 @@ def write_cube_envi_hdr(
 
     # prepare the output header path
     output_envi_hdr_path = out_dir / envi_header_path.name
-    ccube_stem = lbl_path.stem.replace('vrral', 'ccube')    
-    output_envi_hdr_path = (out_dir / ccube_stem).with_suffix('.hdr')
+    ifcub_id = instrument_id + IFCUB_STR
+    cube_stem = lbl_path.stem.replace('vrral', ifcub_id)
+    out_path = out_dir / (cube_stem + '.hdr')
 
     # write the dict to a text file, as a new envi header file
-    with open(output_envi_hdr_path, 'w') as f:
+    with open(out_path, 'w') as f:
         f.write('ENVI\n')
         for key, value in envi_header_dict.items():
             if key in ['band names', 'wavelength','default bands']:
@@ -422,13 +427,14 @@ def write_cube_envi_hdr(
                 f.write(line[:-2] + '}\n')
             else:
                 f.write(f'{key} = {value}\n')
-    return output_envi_hdr_path
+    return out_path
 
-def export_cube_geotiff(
+def export_ifcub_geotiff(
         cube: np.ndarray,
         band_list: list,
         band_cwls: list,
         no_data: float,
+        instrument_id: str,
         lbl_path: Path,
         out_dir: Path
     ) -> Path:
@@ -450,15 +456,23 @@ def export_cube_geotiff(
     :return: Path to the exported GeoTIFF file
     :rtype: Path
     """
+
+    # from the LBL file, get the PDS IMG file, from which the georeferencing
+    # will be extracted
     pds_file = lbl_path.with_suffix('.img')
 
-    cube_stem = lbl_path.stem.replace('vrral', 'cifcub')
-
+    # set the output path, replacing vrral product ID with the new 
+    # [instrument]ifcub ID
+    ifcub_id = instrument_id + IFCUB_STR
+    cube_stem = lbl_path.stem.replace('vrral', ifcub_id)
     out_path = out_dir / (cube_stem + '.tif')
 
+    # read the georeferencing info from the PDS IMG file
     pds_gdal = gdal.Open(str(pds_file))
     pds_transform = Affine.from_gdal(*pds_gdal.GetGeoTransform())
     pds_crs = CRS.from_wkt(pds_gdal.GetProjection())
+
+    # prepare the output GeoTIFF
     with rio.open(out_path, 'w', 
                     driver='GTiff',
                     height=cube.shape[1], 
@@ -468,9 +482,13 @@ def export_cube_geotiff(
                     compress='LZW',
                     nodata=no_data,
                     crs=pds_crs, transform=pds_transform) as new_dataset:
+        # write each band to the GeoTIFF
         for b_idx, band in enumerate(band_list):
+            # write the band data
             new_dataset.write(cube[b_idx,:,:], b_idx + 1)
+            # set the band name
             new_dataset.set_band_description(b_idx+1, band)
+            # set the band wavelength tag
             new_dataset.update_tags(b_idx+1, WAVELENGTH=f'{band_cwls[b_idx]}nm')
     new_dataset.close()
     
@@ -642,11 +660,12 @@ def export_spcub_geotiff(
 
 # CaSSIS Specific Operations
 
-def cassis_browse_product(
-        product: Literal['NPB', 'NRB', 'NRP', 'RPB', 'RGB'],
+def browse_product(
+        bp_func, # needs to be a function
         cube,
-        stretched_cube,
         no_data,
+        pct_params: Tuple[float, float]=(0.01, 99.95),
+        st_params: np.ndarray | None = None
     ) -> np.array:
     """Make a stretched browse product from the cube array
     
@@ -661,53 +680,47 @@ def cassis_browse_product(
     :return: browse product array
     :rtype: np.array
     """    
-
-    if product == 'NPB':
-        band_list = ['NIR', 'PAN', 'BLU']
-        r_arr = stretched_cube[3]
-        g_arr = stretched_cube[1]
-        b_arr = stretched_cube[0]
-
-    if product == 'NRB':
-        band_list = ['NIR', 'RED', 'BLU']
-        r_arr = stretched_cube[3]
-        g_arr = stretched_cube[2]
-        b_arr = stretched_cube[0]
-
-    if product == 'NRP':
-        band_list = ['NIR', 'RED', 'PAN']
-        r_arr = stretched_cube[3]
-        g_arr = stretched_cube[2]
-        b_arr = stretched_cube[1]
     
-    if product == 'RPB':
-        band_list = ['RED', 'PAN', 'BLU']
-        r_arr = stretched_cube[2]
-        g_arr = stretched_cube[1]
-        b_arr = stretched_cube[0]
+    stretched_cube, st_params = stretch_cube(cube, no_data, pct_params, st_params)
+    browse_arr, band_list = bp_func(stretched_cube)
 
-    if product == 'PAN':
-        band_list = ['PAN', 'PAN', 'PAN']
-        r_arr = stretched_cube[1]
-        g_arr = stretched_cube[1]
-        b_arr = stretched_cube[1]
+    # if product == 'NRB':
+    #     band_list = ['NIR', 'RED', 'BLU']
+    #     r_arr = stretched_cube[3]
+    #     g_arr = stretched_cube[2]
+    #     b_arr = stretched_cube[0]
 
-    if product == 'RGB':
-        band_list = ['PAN', 'BLU', 'sBLU']
-        # make synthetic blu channel
-        # mask with no data
-        no_data_mask = (cube[0] != no_data) & (cube[1] != no_data)
-        sBLU = (2*cube[0]) - (0.3*cube[1])
-        sBLU[~no_data_mask] = no_data
-        sBLU_stretch = stretch_image(sBLU, no_data=no_data)
-        r_arr = stretched_cube[1]
-        g_arr = stretched_cube[0]
-        b_arr = sBLU_stretch
+    # if product == 'NRP':
+    #     band_list = ['NIR', 'RED', 'PAN']
+    #     r_arr = stretched_cube[3]
+    #     g_arr = stretched_cube[2]
+    #     b_arr = stretched_cube[1]
+    
+    # if product == 'RPB':
+    #     band_list = ['RED', 'PAN', 'BLU']
+    #     r_arr = stretched_cube[2]
+    #     g_arr = stretched_cube[1]
+    #     b_arr = stretched_cube[0]
 
-    browse_arr = np.array([r_arr, g_arr, b_arr])
-    browse_arr = browse_arr.transpose((1, 2, 0))
+    # if product == 'PAN':
+    #     band_list = ['PAN', 'PAN', 'PAN']
+    #     r_arr = stretched_cube[1]
+    #     g_arr = stretched_cube[1]
+    #     b_arr = stretched_cube[1]
 
-    return browse_arr, band_list
+    # if product == 'RGB':
+    #     band_list = ['PAN', 'BLU', 'sBLU']
+    #     # make synthetic blu channel
+    #     # mask with no data
+    #     no_data_mask = (cube[0] != no_data) & (cube[1] != no_data)
+    #     sBLU = (2*cube[0]) - (0.3*cube[1])
+    #     sBLU[~no_data_mask] = no_data
+    #     sBLU_stretch = stretch_image(sBLU, no_data=no_data)
+    #     r_arr = stretched_cube[1]
+    #     g_arr = stretched_cube[0]
+    #     b_arr = sBLU_stretch
+
+    return browse_arr, band_list, st_params
 
 def cassis_sp(
         parameter: Literal[
