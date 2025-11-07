@@ -78,7 +78,7 @@ def prepare_output_dir(
         lbl_path: Path, 
         mc_path: Path, 
         output_path: Path,
-        overwrite: bool=False) -> Union[bool,Path]:
+        overwrite: bool=False) -> Path:
     """Prepare the output directory for the given tile and quadrant.
 
     :param lbl_path: Path to the .lbl file
@@ -96,7 +96,7 @@ def prepare_output_dir(
             print('Output directory exists, overwriting: ', output_dir)
         else:
             print('Output directory exists, skipping: ', output_dir)
-            return False
+            return Path()
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -161,7 +161,7 @@ def plot_channel_profiles(
 
 def unpack_channel_profiles(
         inst_df: pd.DataFrame
-        ) -> Tuple[np.ndarray, np.ndarray, list, list]:
+        ) -> Tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
     """Unpack the channel profiles DataFrame into arrays and lists.
     
     :param inst_df: DataFrame containing the channel profiles indexed by 
@@ -175,8 +175,8 @@ def unpack_channel_profiles(
     arr_wvls = inst_df.index.to_numpy()
     band_list = inst_df.columns.tolist()
     band_cwls = np.round(
-                        np.sum(band_arr*arr_wvls[:, np.newaxis], axis=0) 
-                            / np.sum(band_arr, axis=0)
+                        np.array(np.sum(band_arr*arr_wvls[:, np.newaxis], axis=0) 
+                            / np.sum(band_arr, axis=0))
                         )
 
     return band_arr, arr_wvls, band_list, band_cwls
@@ -203,7 +203,7 @@ def interp_band_profile(
                            kind='linear', 
                            bounds_error=False,
                            fill_value=0.0)
-    resampled_profile = interp_func(cube_wvls)
+    resampled_profile: np.ndarray = interp_func(cube_wvls)
     resampled_profile = np.clip(resampled_profile, 0, None)
     return resampled_profile
 
@@ -250,8 +250,7 @@ def resample_cube(
 
 def stretch_image(image: np.ndarray, 
                   no_data: float,
-                  lower_pct: float=0.01, 
-                  upper_pct: float=99.95,
+                  pct_params: Tuple[float, float]=(0.01, 99.95),
                   st_params: Tuple[float, float]|None = None,
                   ) -> Tuple[np.ndarray, Tuple[float, float]]:
     """Apply a linear stretch to the image based on the given percentiles.
@@ -272,7 +271,7 @@ def stretch_image(image: np.ndarray,
     stretch_img = image.copy()
     stretch_img[image == no_data] = np.nan
     if st_params is None:
-        lower, upper = np.nanpercentile(stretch_img, (lower_pct, upper_pct))  
+        lower, upper = np.nanpercentile(stretch_img, pct_params)  
     else:
         lower, upper = st_params      
 
@@ -290,7 +289,7 @@ def stretch_cube(
         no_data: float,
         pct_params: Tuple[float, float]=(0.01, 99.95),
         st_params: np.ndarray | None = None
-        ) -> np.ndarray:
+        ) -> tuple[np.ndarray, np.ndarray]:
     """Apply contrast stretch to each band in a cube.
 
     :param cube: Input image cube (3D numpy array)
@@ -312,46 +311,21 @@ def stretch_cube(
 
     # get stretch parameters
     if st_params is None:
-        st_params = np.nanpercentile(stcub, pct_params, axis=(1,2))
+        lower, upper = np.nanpercentile(stcub, pct_params, axis=(1,2))
+    else:
+        lower, upper = st_params
 
     # apply stretch
-    lower = st_params[0][:, np.newaxis, np.newaxis]
-    upper = st_params[1][:, np.newaxis, np.newaxis]
+    lower = lower[:, np.newaxis, np.newaxis]
+    upper = upper[:, np.newaxis, np.newaxis]
     stcub = (stcub - lower) / (upper - lower)
     stcub = np.clip(stcub, 0, 1)
     stcub = (np.rint(stcub * 254))
     stcub[mask] = 255
-
+    
+    st_params = np.stack((lower.flatten(), upper.flatten()), axis=0)
+    
     return np.array(stcub).astype(np.uint8), st_params
-
-def spcub_from_ifcub(
-        cube: np.ndarray,
-        sp_list: List[str],
-        no_data: float
-    ) -> Tuple[np.array, list]:
-    """Create a spectral parameter stack from the given Spectral Parameters.
-
-    This function computes the spectral parameters for the provided data cube
-    and stacks them into a single array for further analysis.
-
-    :param cube: Input data cube (3D numpy array)
-    :type cube: np.ndarray
-    :param no_data: No-data value in the cube
-    :type no_data: float
-    :param sp_list: List of spectral parameters to compute
-    :type sp_list: List[str]
-    :return: Tuple containing the spectral parameter stack (3D numpy array),
-        and list of spectral parameter names
-    :rtype: Tuple[np.array, list]
-    """    
-    sp_cube = []
-    sp_band_list = []
-    for sp_id in sp_list:
-        sp_data, sp_bands = cassis_sp(sp_id, cube, no_data)
-        sp_cube.append(sp_data)
-        sp_band_list.append(sp_bands[0])
-    sp_cube = np.stack(sp_cube, axis=2).astype(np.float32)
-    return sp_cube, sp_band_list
 
 def write_ifcub_envi_hdr(
         band_list: list, 
@@ -406,7 +380,6 @@ def write_ifcub_envi_hdr(
     envi_header_dict['default bands'] = ', '.join(str(x) for x in default_bands)
 
     # prepare the output header path
-    output_envi_hdr_path = out_dir / envi_header_path.name
     ifcub_id = instrument_id + IFCUB_STR
     cube_stem = lbl_path.stem.replace('vrral', ifcub_id)
     out_path = out_dir / (cube_stem + '.hdr')
@@ -555,10 +528,11 @@ def export_bp_geotiff(
     
     return out_path
 
-def write_sups_envi_hdr(
+def write_spcub_envi_hdr(
         sp_list, 
         no_data,
         default_bands,
+        instrument_id,
         lbl_path, 
         out_dir)->Path:
     """Write an ENVI header file for the SUmmary Product Stack
@@ -585,13 +559,9 @@ def write_sups_envi_hdr(
         if '=' in line:
             key, value = line.split('=', 1)
             if key.strip() == 'band names':
-                # get the number of bands
-                n_bands = int(envi_header_dict['bands'])  
                 envi_header_dict['band names'] = ''
                 continue
             if key.strip() == 'wavelength':
-                # get the number of bands
-                n_bands = int(envi_header_dict['bands'])  
                 envi_header_dict['wavelength'] = ''
                 continue
             envi_header_dict[key.strip()] = value.strip()
@@ -603,13 +573,17 @@ def write_sups_envi_hdr(
         del envi_header_dict['wavelength']
     envi_header_dict['file type'] = 'TIFF'
     envi_header_dict['default bands'] = ', '.join(str(x) for x in default_bands)
+    envi_header_dict['data ignore value'] = str(no_data)
 
     # replace vrral with cspcub
-    cspcub_stem = lbl_path.stem.replace('vrral', 'cspcub')
-    output_envi_hdr_path = (out_dir / cspcub_stem).with_suffix('.hdr')
+    # set the output path, replacing vrral product ID with the new 
+    # [instrument]spcub ID
+    spcub_id = instrument_id + SPCUB_STR
+    cube_stem = lbl_path.stem.replace('vrral', spcub_id)
+    out_path = out_dir / (cube_stem + '.hdr')
 
     # write the dict to a text file, as a new envi header file
-    with open(output_envi_hdr_path, 'w') as f:
+    with open(out_path, 'w') as f:
         f.write('ENVI\n')
         for key, value in envi_header_dict.items():
             if key in ['band names', 'default bands']:
@@ -624,12 +598,13 @@ def write_sups_envi_hdr(
                 f.write(line[:-2] + '}\n')
             else:
                 f.write(f'{key} = {value}\n')
-    return output_envi_hdr_path
+    return out_path
 
 def export_spcub_geotiff(
-        sp_stack: np.ndarray,
+        spcub: np.ndarray,
         sp_ids: list,
         no_data: int,
+        instrument_id,
         lbl_path: Path,
         out_dir: Path
     ) -> Path:
@@ -637,145 +612,28 @@ def export_spcub_geotiff(
     file with georeferencing from the VRDR LBL file."""
     pds_file = lbl_path.with_suffix('.img')
 
-    # replace vrral with cspcub
-    cspcub_stem = lbl_path.stem.replace('vrral', 'cspcub')
-    out_path = out_dir / (cspcub_stem + '.tif')
+    # set the output path, replacing vrral product ID with the new 
+    # [instrument]spcub ID
+    spcub_id = instrument_id + SPCUB_STR
+    cube_stem = lbl_path.stem.replace('vrral', spcub_id)
+    out_path = out_dir / (cube_stem + '.tif')
 
     pds_gdal = gdal.Open(str(pds_file))
     pds_transform = Affine.from_gdal(*pds_gdal.GetGeoTransform())
     pds_crs = CRS.from_wkt(pds_gdal.GetProjection())    
-    arr = sp_stack
     with rio.open(out_path, 'w', driver='GTiff',
-                                height = arr.shape[0], width = arr.shape[1],
-                                count=len(sp_ids), dtype=str(arr.dtype),
+                                height = spcub.shape[1], width = spcub.shape[2],
+                                count=spcub.shape[0], dtype=str(spcub.dtype),
                                 compress='LZW',
                                 nodata=no_data,
                                 crs=pds_crs, transform=pds_transform) as new_dataset:
         for sp_idx, sp in enumerate(sp_ids):
-            new_dataset.write(arr[:,:,sp_idx], sp_idx + 1)    
+            new_dataset.write(spcub[sp_idx,:,:], sp_idx + 1)    
             new_dataset.set_band_description(sp_idx+1, sp)
     new_dataset.close()
     
     return out_path
 
-# CaSSIS Specific Operations
-
-def browse_product(
-        bp_func, # needs to be a function
-        cube,
-        no_data,
-        pct_params: Tuple[float, float]=(0.01, 99.95),
-        st_params: np.ndarray | None = None
-    ) -> np.array:
-    """Make a stretched browse product from the cube array
-    
-    :param product: browse product ID
-    :type product: Literal[NPB, NRB, NRP, RPB, RGB]
-    :param cube: multiband cube
-    :type cube: np.ndarray
-    :param cassis_stretch_cube: stretched cube
-    :type cassis_stretch_cube: np.ndarray
-    :param no_data: no data value
-    :type no_data: float
-    :return: browse product array
-    :rtype: np.array
-    """    
-    
-    stretched_cube, st_params = stretch_cube(cube, no_data, pct_params, st_params)
-    browse_arr, band_list = bp_func(stretched_cube)
-
-    # if product == 'NRB':
-    #     band_list = ['NIR', 'RED', 'BLU']
-    #     r_arr = stretched_cube[3]
-    #     g_arr = stretched_cube[2]
-    #     b_arr = stretched_cube[0]
-
-    # if product == 'NRP':
-    #     band_list = ['NIR', 'RED', 'PAN']
-    #     r_arr = stretched_cube[3]
-    #     g_arr = stretched_cube[2]
-    #     b_arr = stretched_cube[1]
-    
-    # if product == 'RPB':
-    #     band_list = ['RED', 'PAN', 'BLU']
-    #     r_arr = stretched_cube[2]
-    #     g_arr = stretched_cube[1]
-    #     b_arr = stretched_cube[0]
-
-    # if product == 'PAN':
-    #     band_list = ['PAN', 'PAN', 'PAN']
-    #     r_arr = stretched_cube[1]
-    #     g_arr = stretched_cube[1]
-    #     b_arr = stretched_cube[1]
-
-    # if product == 'RGB':
-    #     band_list = ['PAN', 'BLU', 'sBLU']
-    #     # make synthetic blu channel
-    #     # mask with no data
-    #     no_data_mask = (cube[0] != no_data) & (cube[1] != no_data)
-    #     sBLU = (2*cube[0]) - (0.3*cube[1])
-    #     sBLU[~no_data_mask] = no_data
-    #     sBLU_stretch = stretch_image(sBLU, no_data=no_data)
-    #     r_arr = stretched_cube[1]
-    #     g_arr = stretched_cube[0]
-    #     b_arr = sBLU_stretch
-
-    return browse_arr, band_list, st_params
-
-def cassis_sp(
-        parameter: Literal[
-            'PBR', #PAN/BLU
-            'PNR', #PAN/NIR
-            'RPR', #RED/PAN
-            'ICE-ATM', #MEAN[B,P,R,N]/(NIR/BLU)
-            'ICE-H2O', #MEAN[B,P,R]/(NIR)
-        ],
-        cube,
-        no_data        
-    )->Tuple[np.array,np.array]:
-    """Compute a given CaSSIS spectral parameter from the CaSSIS data cube.
-
-    :param parameter: Spectral parameter ID
-    :type parameter: Literal[
-            'PBR', #PAN/BLU
-            'PNR', #PAN/NIR
-            'RPR', #RED/PAN
-            'ICE-ATM', #MEAN[B,P,R,N]/(NIR/BLU)
-            'ICE-H2O', #MEAN[B,P,R]/(NIR)
-    :param cube: CaSSIS data cube
-    :type cube: np.ndarray
-    :param no_data: No-data value
-    :type no_data: float
-    :return: Spectral Parameter Array, Stretched Browse Product Spectral 
-        Parameter Array, Spectral Parameter List
-    :rtype: Tuple[np.array,np.array]
-    """    
-
-    no_data_locs = cube == no_data
-
-    if parameter == 'PBR':
-        band_list = ['PBR']
-        sp_arr = np.divide(cube[1], cube[0], where=~no_data_locs[0])
-
-    if parameter == 'PNR':
-        band_list = ['PNR']
-        sp_arr = np.divide(cube[1], cube[3], where=~no_data_locs[3])
-
-    if parameter == 'RPR':
-        band_list = ['RPR']
-        sp_arr = np.divide(cube[2], cube[1], where=~no_data_locs[1])
-
-    if parameter == 'ICE-ATM':
-        band_list = ['ICE-ATM']
-        sp_arr = np.divide(np.mean(cube, axis=0), (cube[3] / cube[0]), 
-                           where=~no_data_locs[0])
-    
-    if parameter == 'ICE-H2O':
-        band_list = ['ICE-H2O']
-        sp_arr = np.divide(np.mean(cube, axis=0), (cube[3]), 
-                           where=~no_data_locs[0])
-    
-    return sp_arr, band_list
 
 def cassis_composite_sp(
         composite: Literal[
