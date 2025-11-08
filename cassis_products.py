@@ -6,8 +6,9 @@
 from typing import Callable
 import numpy as np
 
-BP_LIST = ['NPB', 'NRB', 'NRP', 'RPB', 'RGB']
+BP_LIST = ['NPB', 'NRB', 'NRP', 'RPB', 'PAN','RGB']
 SP_LIST = ['RPR','PBR','PNR','ICE-ATM','ICE-H2O']
+CP_LIST = ['CBRC1', 'CBRC2']
 
 def spectral_parameter_stack(cifcub: np.ndarray,
                              no_data: float
@@ -292,3 +293,49 @@ def cassis_bp_rgb(st_cube_mod: np.ndarray) -> tuple[np.ndarray, list[str]]:
     browse_arr = browse_arr.transpose((1, 2, 0))
 
     return browse_arr, band_list
+
+def composite_product(cp_id: str):
+    if cp_id == 'CBRC1':
+        cp_func = cassis_cp_cbrc1
+    elif cp_id == 'CBRC2':
+        cp_func = cassis_cp_cbrc2
+    else:
+        raise ValueError(f'Composite product {cp_id} not recognised.')    
+    return cp_func
+
+def cassis_cp_cbrc1(ifcub: np.ndarray, no_data: float) -> tuple[np.ndarray, list[str]]:
+    """CBRC1: RPR, PBR, PNR == Red, Green, Blue
+
+    :param ifcub: Input I/F cube
+    :type ifcub: np.ndarray
+    :param no_data: No-data value
+    :type no_data: float
+    :return: Composite spectral parameter cube and band list
+    :rtype: Tuple[np.ndarray, list[str]]
+    """    
+    sp_list = ['RPR', 'PBR', 'PNR']        
+    cp_arr = np.array([
+        cassis_sp_rpr(ifcub, no_data),
+        cassis_sp_pbr(ifcub, no_data),
+        cassis_sp_pnr(ifcub, no_data)
+    ])
+    return cp_arr, sp_list
+
+def cassis_cp_cbrc2(ifcub: np.ndarray, no_data: float) -> tuple[np.ndarray, list[str]]:
+    """CBRC2: RPR, PBR, ICE == Red, Green, Blue
+
+    :param ifcub: Input I/F cube
+    :type ifcub: np.ndarray
+    :param no_data: No-data value
+    :type no_data: float
+    :return: Composite spectral parameter cube and band list
+    :rtype: Tuple[np.ndarray, list[str]]
+    """
+    no_data_locs = ifcub[0] == no_data
+    sp_list = ['RPR', 'PBR', 'ICE-ATM']
+    cp_arr = np.array([
+        cassis_sp_rpr(ifcub, no_data),
+        cassis_sp_pbr(ifcub, no_data),
+        cassis_sp_ice_atm(ifcub, no_data)
+        ])
+    return cp_arr, sp_list

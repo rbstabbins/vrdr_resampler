@@ -32,9 +32,10 @@ SPCUB_STR = 'spcub' # Spectral Parameter (or Summary Product) Cube
 # statistics have been evaluated.
 # Browse product type IF is attached as suffix to the string identifier,
 # e.g. for CaSSIS NPB tile-stretched browse product becomes 'cbtnpb'
-BT_STR = 'bt' # Browse product 'Tile' stretched
-BQ_STR = 'bq' # Browse product 'Quadrant' stretched
-BG_STR = 'bg' # Browse product 'Global' stretched
+BP_STR = {'tile': 'bt', 'quadrant': 'bq', 'global': 'bg'}
+# BT_STR = 'bt' # Browse product 'Tile' stretched
+# BQ_STR = 'bq' # Browse product 'Quadrant' stretched
+# BG_STR = 'bg' # Browse product 'Global' stretched
 
 
 def get_quadrant_dirs(vrdr_path: Path) -> List[Path]:
@@ -303,11 +304,9 @@ def stretch_cube(
     :return: Contrast-stretched image cube (3D numpy array)
     :rtype: np.ndarray
     """
-
+    no_data_locs = cube == no_data
     stcub = cube.astype(float)
-    # mask no_data values
-    mask = (stcub == no_data)
-    stcub[mask] = np.nan
+    stcub[no_data_locs] = np.nan
 
     # get stretch parameters
     if st_params is None:
@@ -321,17 +320,47 @@ def stretch_cube(
     stcub = (stcub - lower) / (upper - lower)
     stcub = np.clip(stcub, 0, 1)
     stcub = (np.rint(stcub * 254))
-    stcub[mask] = 255
+    stcub[no_data_locs] = 255
     
     st_params = np.stack((lower.flatten(), upper.flatten()), axis=0)
     
     return np.array(stcub).astype(np.uint8), st_params
 
+def log_st_params(
+        st_params: np.ndarray,
+        band_list: list[str],
+        lbl_path: Path,
+        out_dir: Path
+    ) -> Path:
+    """Log the stretch parameters in a tab-delimited text file
+
+    :param st_params: Stretch parameters (min, max) for each band
+    :type st_params: np.ndarray
+    :param band_list: List of band names
+    :type band_list: list[str]
+    :param lbl_path: Path to the VRDR .lbl file
+    :type lbl_path: Path
+    :param out_dir: Output directory for the log file
+    :type out_dir: Path
+    :return: Path to the log file
+    :rtype: Path
+    """    
+    # set the txt file to write out to
+    out_stem = lbl_path.stem.replace('vrral', 'strtch')
+    out_txt = out_dir / f'{out_stem}.log'
+
+    with open(out_txt, 'w') as f:
+        f.write('Band\tLower\tUpper\n')
+        for i, band in enumerate(band_list):
+            f.write(f'{band}\t{np.round(st_params[0,i], 6)}\t{np.round(st_params[1,i], 6)}\n')
+    
+    return out_txt
+
 def write_ifcub_envi_hdr(
-        band_list: list, 
-        band_cwls: list,
+        band_list: list[str], 
+        band_cwls: np.ndarray,
         no_data: float,
-        default_bands: list,
+        default_bands: list[int],
         instrument_id: str,
         lbl_path: Path, 
         out_dir: Path
@@ -404,8 +433,8 @@ def write_ifcub_envi_hdr(
 
 def export_ifcub_geotiff(
         cube: np.ndarray,
-        band_list: list,
-        band_cwls: list,
+        band_list: list[str],
+        band_cwls: np.ndarray,
         no_data: float,
         instrument_id: str,
         lbl_path: Path,
@@ -417,11 +446,13 @@ def export_ifcub_geotiff(
     :param cube: Image cube to export (3D numpy array)
     :type cube: np.ndarray
     :param band_list: List of band names
-    :type band_list: list
-    :param band_cwls: List of band center wavelengths
-    :type band_cwls: list
+    :type band_list: list[str]
+    :param band_cwls: Array of band center wavelengths
+    :type band_cwls: np.ndarray
     :param no_data: No-data value in the cube
     :type no_data: float
+    :param instrument_id: Instrument identifier string
+    :type instrument_id: str
     :param lbl_path: Path to the VRDR .lbl file
     :type lbl_path: Path
     :param out_dir: Output directory for the GeoTIFF
@@ -470,10 +501,12 @@ def export_ifcub_geotiff(
 def export_bp_geotiff(
         browse_product_data: np.ndarray,
         browse_product_id: str,
-        no_data: int,
-        band_list: list,
+        no_data: float,
+        band_list: list[str],
+        instrument_id: str,
         lbl_path: Path,
-        out_dir: Path
+        out_dir: Path,
+        stretch_extent: Literal['tile','quadrant','global']= 'tile',
     ) -> Path:
     """Export a browse product as a GeoTIFF file with georeferencing 
     from the VRDR LBL file.
@@ -483,9 +516,11 @@ def export_bp_geotiff(
     :param browse_product_id: Browse product ID (e.g., 'NPB', 'RGB')
     :type browse_product_id: str
     :param no_data: No-data value in the browse product
-    :type no_data: int
+    :type no_data: float
     :param band_list: List of band names
-    :type band_list: list
+    :type band_list: list[str]
+    :param instrument_id: Instrument identifier string
+    :type instrument_id: str
     :param lbl_path: Path to the VRDR .lbl file
     :type lbl_path: Path
     :param out_dir: Output directory for the GeoTIFF
@@ -495,10 +530,12 @@ def export_bp_geotiff(
     """        
     pds_file = lbl_path.with_suffix('.img')
 
-    # replace vrral with  cb{browse_product_id}
-    cb_browse_product_id = f'cbp{browse_product_id.lower()}'
-    browse_product_stem = lbl_path.stem.replace('vrral', cb_browse_product_id)
-
+    # set the output path, replacing vrral product ID with the new 
+    # [instrument]spcub ID    
+    bp_id = instrument_id + BP_STR[stretch_extent] + browse_product_id.lower()
+    browse_product_stem = lbl_path.stem.replace('vrral', bp_id)
+    # check the outdir exists
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / (browse_product_stem + '.tif')
 
     pds_gdal = gdal.Open(str(pds_file))
@@ -523,26 +560,24 @@ def export_bp_geotiff(
             new_dataset.write(arr[:,:,band_idx], band_idx + 1)    
             new_dataset.set_band_description(band_idx+1, band)            
     new_dataset.close()
-
-    print(f"Browse product exported: {out_path}")
     
     return out_path
 
 def write_spcub_envi_hdr(
-        sp_list, 
-        no_data,
-        default_bands,
-        instrument_id,
-        lbl_path, 
-        out_dir)->Path:
+        sp_list: list[str], 
+        no_data: float,
+        default_bands: list[int],
+        instrument_id: str,
+        lbl_path: Path, 
+        out_dir: Path) -> Path:
     """Write an ENVI header file for the SUmmary Product Stack
 
     :param sp_list: List of spectral parameter names
-    :type sp_list: list
+    :type sp_list: list[str]
     :param no_data: No-data value for the bands
     :type no_data: float
     :param default_bands: List of default bands for display
-    :type default_bands: list
+    :type default_bands: list[int]
     :param lbl_path: Path to the VRDR .lbl file
     :type lbl_path: Path
     :param out_dir: Output directory for the ENVI header
@@ -602,9 +637,9 @@ def write_spcub_envi_hdr(
 
 def export_spcub_geotiff(
         spcub: np.ndarray,
-        sp_ids: list,
-        no_data: int,
-        instrument_id,
+        sp_ids: list[str],
+        no_data: float,
+        instrument_id: str,
         lbl_path: Path,
         out_dir: Path
     ) -> Path:
@@ -634,57 +669,10 @@ def export_spcub_geotiff(
     
     return out_path
 
-
-def cassis_composite_sp(
-        composite: Literal[
-            'CBRC1', #(RPR, PBR, PNR)->(R,G,B)
-            'CBRC2', #(RPR, PBR, ICE)->(R,G,B)
-        ],
-        cube,
-        no_data        
-    )->Tuple[np.array,np.array]:
-    """Compute a given CaSSIS composite spectral parameter from the 
-    CaSSIS data cube.
-
-    :param composite: Composite parameter ID
-    :type composite: Literal[
-            'CBRC1', #(RPR, PBR, PNR)->(R,G,B)
-            'CBRC2', #(RPR, PBR, ICE)->(R,G,B)
-    :param cube: CaSSIS data cube
-    :type cube: np.ndarray
-    :param no_data: No-data value
-    :type no_data: float
-    :return: Spectral Parameter Array, Stretched Browse Product Spectral
-    :rtype: Tuple[np.array,np.array]
-    """    
-
-    no_data_locs = cube == no_data
-
-    if composite == 'CBRC1':
-        bands = 3
-        band_list = ['RPR', 'PBR', 'PNR']        
-        sp_arr = np.array([
-            np.divide(cube[2], cube[1], where=~no_data_locs[1]),
-            np.divide(cube[1], cube[0], where=~no_data_locs[0]),
-            np.divide(cube[1], cube[3], where=~no_data_locs[3])
-        ])
-    
-    if composite == 'CBRC2':
-        bands = 3
-        band_list = ['RPR', 'PBR', 'ICE']
-        sp_arr = np.array([
-            np.divide(cube[2], cube[1], where=~no_data_locs[1]),
-            np.divide(cube[1], cube[0], where=~no_data_locs[0]),
-            np.divide(np.mean(cube, axis=0), (cube[3] / cube[0]), 
-                      where=~no_data_locs[0])
-        ])
-    
-    return sp_arr, band_list
-
 # read a geotiff cube
 def read_geotiff_cube(
         geotiff_path: Path
-    ) -> Tuple[np.ndarray, Affine, CRS, float]:
+    ) -> Tuple[np.ndarray, float]:
     """Read a GeoTIFF cube and return the data array, transform, CRS, and 
     no-data value.
 
@@ -723,3 +711,39 @@ def read_geotiff_stretch_stats(
             # band_stats = stats.min, stats.max
             stats_list.append(band_stats)
     return stats_list
+
+def read_log_file(
+        log_path: Path
+    ) -> dict:
+    """Read the stretch parameters from a log file.
+
+    :param log_path: Path to the log file
+    :type log_path: Path
+    :return: Dictionary containing stretch parameters for each band
+    :rtype: dict
+    """    
+    st_params = pd.read_csv(log_path, sep='\t', index_col=0)
+    return st_params
+
+def get_quadrant_stretch_params(
+        tile_paths: List[Path]
+    ) -> np.ndarray:
+    """Get the quadrant-wide stretch parameters from the tile log files.
+
+    :param tile_paths: List of tile directory paths
+    :type tile_paths: List[Path]
+    :return: Quadrant-wide stretch parameters (2D numpy array)
+    :rtype: np.ndarray
+    """
+    # get quadrant-wide lower and upper stretch params
+    lower_log = []
+    upper_log = []
+    for tile_path in tile_paths:
+        log_file = [f for f in tile_path.glob('*strtch*.log')][0]        
+        st_params = read_log_file(log_file).to_numpy().T
+        lower_log.append(st_params[0])
+        upper_log.append(st_params[1])
+    quad_min = np.min(np.array(lower_log), axis=0)
+    quad_max = np.max(np.array(upper_log), axis=0)
+    quad_st_params = np.array([quad_min, quad_max])
+    return quad_st_params
