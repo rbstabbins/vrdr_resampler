@@ -8,7 +8,7 @@ The entire MC18 quadrant resampled to CaSSIS NPB (top right) and PAN (bottom lef
 - [About](#about)
 - [Getting Started](#getting_started)
 - [Usage](#usage)
-- [Contributing](../CONTRIBUTING.md)
+- [Contributors](#contributors)
 
 ## About <a name = "about"></a>
 
@@ -24,15 +24,13 @@ This module has been used to construct the CaSSIS-VRDR-Resampled Dataset, that w
 
 ### Downloading the VRDR Dataset
 
-A large part of the resampling project is simply downloading a local copy of the entire VRDR data `vrral` (Lambert Albedo) products. This can be achieved with the `download_vrral_all.sh` script. Please note the entire dataset is ~5.5 Tb, so sufficient storage is required. This script requires `lftp`, `wget` and GNU `parallel` to run.
+A significant part of the resampling project is simply downloading a local copy of the entire VRDR data `vrral` (Lambert Albedo) products. This can be achieved with the `download_vrral_all.sh` script. Please note the entire dataset is ~5.5 Tb, so sufficient storage is required. This script requires `lftp`, `wget` and GNU `parallel` to run.
 
 ### Environment Setup
 
-We're yet to package the module into a standalone conda/pip script.
+We're yet to package the module into an installable conda/pip package.
 
-For now, to get this code working for yourself, you can either zip download the repository, or git clone it.
-
-You can get the software running by creating a new conda environment from the provided `environment.yml` file. i.e. by running
+For now, to get this code working for yourself, you can either zip download the repository, or git clone it, and by creating a new conda environment from the provided `environment.yml` file. i.e. by running
 
 ```
 conda env create -f environment.yml
@@ -55,7 +53,7 @@ First the notebook walks through the steps for:
 6. Computing a float32 Spectral Parameter (Summary Product) stack, and exporting this to GeoTIFF, with an ENVI header
 7. Producing 24-bit colour composite CaSSIS Browse Products, and exporting these to GeoTIFFs
    
-At the end of the notebook, and cell is provided that runs the outlined steps iteratively over all quadrants and tiles of the downloaded `vrdr` dataset.
+At the end of the notebook, a cell is provided that runs the outlined steps iteratively over all quadrants and tiles of the downloaded `vrdr` dataset.
 
 Note that sufficient storage is required to host the processed products, of ~33 Gb per quadrant, or ~1 Tb in total.
 
