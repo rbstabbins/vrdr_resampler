@@ -20,6 +20,7 @@ import pdr
 from pyproj import CRS
 import rasterio as rio
 from rasterio.transform import Affine
+from rasterio.warp import reproject, Resampling
 from scipy.interpolate import interp1d
 import time
 
@@ -438,7 +439,8 @@ def export_ifcub_geotiff(
         no_data: float,
         instrument_id: str,
         lbl_path: Path,
-        out_dir: Path
+        out_dir: Path,
+        new_resolution: float | None = None # the new resolution in meters
     ) -> Path:
     """Export the cube as a GeoTIFF file with georeferencing from the 
     VRDR LBL file.
@@ -457,8 +459,10 @@ def export_ifcub_geotiff(
     :type lbl_path: Path
     :param out_dir: Output directory for the GeoTIFF
     :type out_dir: Path
+    :param new_resolution: New resolution in meters (optional)
+    :type new_resolution: float | None
     :return: Path to the exported GeoTIFF file
-    :rtype: Path
+    :rtype: Path    
     """
 
     # from the LBL file, get the PDS IMG file, from which the georeferencing
@@ -475,6 +479,34 @@ def export_ifcub_geotiff(
     pds_gdal = gdal.Open(str(pds_file))
     pds_transform = Affine.from_gdal(*pds_gdal.GetGeoTransform())
     pds_crs = CRS.from_wkt(pds_gdal.GetProjection())
+
+    if new_resolution is not None:
+        scale = pds_transform.a /new_resolution
+        new_width = int(pds_gdal.RasterXSize * scale)
+        new_height = int(pds_gdal.RasterYSize * scale)
+
+        new_transform = Affine(
+            new_resolution, pds_transform.b, pds_transform.c,
+            pds_transform.d, -new_resolution, pds_transform.f
+        )
+
+        new_arr = np.empty((cube.shape[0], new_height, new_width), dtype=cube.dtype)
+
+        for b_idx in range(cube.shape[0]):
+            reproject(
+                source=cube[b_idx, :, :],
+                destination=new_arr[b_idx, :, :],
+                src_transform=pds_transform,
+                src_crs=pds_crs,
+                dst_transform=new_transform,
+                dst_crs=pds_crs,
+                src_nodata=no_data,
+                dst_nodata=no_data,
+                resampling=Resampling.bilinear
+            )
+        
+        cube = new_arr
+        pds_transform = new_transform
 
     # prepare the output GeoTIFF
     with rio.open(out_path, 'w', 
@@ -507,6 +539,8 @@ def export_bp_geotiff(
         lbl_path: Path,
         out_dir: Path,
         stretch_extent: Literal['tile','quadrant','global']= 'tile',
+        new_resolution: float | None = None, # the new resolution in meters
+        apply_new_res: bool = True
     ) -> Path:
     """Export a browse product as a GeoTIFF file with georeferencing 
     from the VRDR LBL file.
@@ -525,6 +559,10 @@ def export_bp_geotiff(
     :type lbl_path: Path
     :param out_dir: Output directory for the GeoTIFF
     :type out_dir: Path
+    :param stretch_extent: Stretch extent for the browse product
+    :type stretch_extent: Literal['tile','quadrant','global']
+    :param new_resolution: New resolution in meters (optional)
+    :type new_resolution: float | None
     :return: Path to the exported GeoTIFF file
     :rtype: Path
     """        
@@ -549,6 +587,36 @@ def export_bp_geotiff(
         arr = np.repeat(arr, 3, axis=2)
         # expand band list by duplication
         band_list = band_list * 3
+
+    if new_resolution is not None:
+        scale = pds_transform.a / new_resolution
+
+        new_transform = Affine(
+            new_resolution, pds_transform.b, pds_transform.c,
+            pds_transform.d, -new_resolution, pds_transform.f
+        )
+
+        if apply_new_res:
+            print(f'Scale factor: {scale}')
+            new_width = int(pds_gdal.RasterXSize * scale)
+            new_height = int(pds_gdal.RasterYSize * scale)
+            new_arr = np.empty((new_height, new_width,arr.shape[2]), dtype=arr.dtype)
+
+            for b_idx in range(arr.shape[2]):
+                reproject(
+                    source=arr[:, :, b_idx],
+                    destination=new_arr[:, :, b_idx],
+                    src_transform=pds_transform,
+                    src_crs=pds_crs,
+                    dst_transform=new_transform,
+                    dst_crs=pds_crs,
+                    src_nodata=no_data,
+                    dst_nodata=no_data,
+                    resampling=Resampling.bilinear
+                )
+            arr = new_arr
+        
+        pds_transform = new_transform
 
     with rio.open(out_path, 'w', driver='GTiff',
                                 height = arr.shape[0], width = arr.shape[1],
@@ -641,7 +709,8 @@ def export_spcub_geotiff(
         no_data: float,
         instrument_id: str,
         lbl_path: Path,
-        out_dir: Path
+        out_dir: Path,
+        new_resolution: float | None = None # the new resolution in meters
     ) -> Path:
     """Export a stack of single-channel spectral parameters as a GeoTIFF 
     file with georeferencing from the VRDR LBL file."""
@@ -655,7 +724,36 @@ def export_spcub_geotiff(
 
     pds_gdal = gdal.Open(str(pds_file))
     pds_transform = Affine.from_gdal(*pds_gdal.GetGeoTransform())
-    pds_crs = CRS.from_wkt(pds_gdal.GetProjection())    
+    pds_crs = CRS.from_wkt(pds_gdal.GetProjection())   
+
+    if new_resolution is not None:
+        scale = pds_transform.a /new_resolution
+        new_width = int(pds_gdal.RasterXSize * scale)
+        new_height = int(pds_gdal.RasterYSize * scale)
+
+        new_transform = Affine(
+            new_resolution, pds_transform.b, pds_transform.c,
+            pds_transform.d, -new_resolution, pds_transform.f
+        )
+
+        new_arr = np.empty((spcub.shape[0],new_height, new_width), dtype=spcub.dtype)
+
+        for b_idx in range(spcub.shape[0]):
+            reproject(
+                source=spcub[b_idx, :, :],
+                destination=new_arr[b_idx, :, :],
+                src_transform=pds_transform,
+                src_crs=pds_crs,
+                dst_transform=new_transform,
+                dst_crs=pds_crs,
+                src_nodata=no_data,
+                dst_nodata=no_data,
+                resampling=Resampling.bilinear
+            )
+        
+        spcub = new_arr
+        pds_transform = new_transform
+
     with rio.open(out_path, 'w', driver='GTiff',
                                 height = spcub.shape[1], width = spcub.shape[2],
                                 count=spcub.shape[0], dtype=str(spcub.dtype),
