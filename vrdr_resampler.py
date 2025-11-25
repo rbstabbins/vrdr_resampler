@@ -110,8 +110,12 @@ def load_vrdr_tile(lbl_path: Path) -> Tuple[np.ndarray, np.ndarray, float]:
     :return: A tuple containing the image cube (3D numpy array), band wavelengths 
         (1D numpy array), and no-data value (float)
     :rtype: Tuple[np.ndarray, np.array, float]
-    """    
-    vrral = pdr.read(lbl_path)
+    """        
+    try:
+        vrral = pdr.read(lbl_path)
+    except Exception as e:
+        return None, None, None
+    
     band_names = vrral.metaget('BAND_NAME')
     cwls = np.array([float(band) for band in band_names])
 
@@ -319,6 +323,7 @@ def stretch_cube(
     lower = lower[:, np.newaxis, np.newaxis]
     upper = upper[:, np.newaxis, np.newaxis]
     stcub = (stcub - lower) / (upper - lower)
+
     stcub = np.clip(stcub, 0, 1)
     stcub = (np.rint(stcub * 254))
     stcub[no_data_locs] = 255
