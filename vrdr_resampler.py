@@ -238,12 +238,21 @@ def resample_cube(
     b_w = band_wvls
     c_w = cube_wvls
     b_a = band_arr
+
+    # drop first 3 channels of the VRDR cube, and the cube_wvls
+    cube = cube[3:, :, :]
+    c_w = c_w[3:]
+
     resampled_profiles = [interp_band_profile(b_p, b_w, c_w) for b_p in b_a.T]
 
     # set no_data values to nan
     cube[cube == no_data] = np.nan
 
+    # # new extra rule - set any I/F value greater than 3.14 - (total specular reflection) to nan, as these are spurious
+    cube[cube >= 3.14] = np.nan
+    
     band_cube = []
+
     cube_t =cube.transpose(1,2,0)
     for band in resampled_profiles:        
         band_image = np.dot(cube_t, band) / np.sum(band)
@@ -312,6 +321,12 @@ def stretch_cube(
     no_data_locs = cube == no_data
     stcub = cube.astype(float)
     stcub[no_data_locs] = np.nan
+
+    # as a secondary precaution, any >1 i/f values should also
+    #  be treated as spurious and set to nan for the computation,
+    # but we preserve the original no_data locations only, inline with CRISM
+    # team definition of no_data pixels
+    # stcub[stcub > 1.0] = np.nan
 
     # get stretch parameters
     if st_params is None:
@@ -850,3 +865,31 @@ def get_quadrant_stretch_params(
     quad_max = np.max(np.array(upper_log), axis=0)
     quad_st_params = np.array([quad_min, quad_max])
     return quad_st_params
+
+def get_global_stretch_params(
+        mc_stretched_paths: List[Path]
+    ) -> np.ndarray:
+    """Get the global stretch parameters from the quadrant-stretch log files.
+
+    :param tile_paths: List of tile directory paths
+    :type tile_paths: List[Path]
+    :return: Quadrant-wide stretch parameters (2D numpy array)
+    :rtype: np.ndarray
+    """
+    # get global lower and upper stretch params
+    lower_log = []
+    upper_log = []
+    for mc_path in mc_stretched_paths:
+        log_file = [f for f in mc_path.glob('*strtch*.log')][0] 
+        print('Reading stretch log file: ', log_file)       
+        st_params = read_log_file(log_file).to_numpy().T
+        lower_log.append(st_params[0])
+        upper_log.append(st_params[1])
+        print('Lower stretch params: ', st_params[0])
+        print('Upper stretch params: ', st_params[1])
+    glbl_min = np.min(np.array(lower_log), axis=0)
+    glbl_max = np.max(np.array(upper_log), axis=0)
+    glbl_st_params = np.array([glbl_min, glbl_max])
+    print('Global stretch parameters - mins: ', glbl_min)
+    print('Global stretch parameters - maxs: ', glbl_max)
+    return glbl_st_params
