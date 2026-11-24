@@ -4,6 +4,3 @@ demo_data/
 .DS_Store
 output_products/
 vrdr_log.xlsx
-orochi_products.py
-vrdr_resampler_orochi.ipynb
-instrument_response/mmx_orochi_system_response.csv
