@@ -44,7 +44,7 @@ from within the downloaded `vrdr_resampler` directory.
 
 The main resampling code is in the `vrdr_resampler.py` module.
 
-The `vrdr_resampler_cassis.ipynb` provides a walk-through for using the module to perform resampling to the CaSSIS filter profiles. These are provided in the `instrument_response` directory. This also uses the `cassis_products.py` module, that provides CaSSIS-specific functions for producing browse products and spectral parameters (summary products) and colour composite products.
+The `vrdr_resampler_cassis.ipynb` provides a walk-through for using the module to perform resampling to the CaSSIS filter profiles. These are provided in the `instrument_response` directory. The data has been digitised from [Pommerol et al 2022](https://doi.org/10.1016/j.pss.2022.105580). The notebook also uses the `cassis_products.py` module, that provides CaSSIS-specific functions for producing browse products and spectral parameters (summary products) and colour composite products.
 
 First the notebook walks through the steps for:
 1. Loading a VRDR Tile from a given Quadrant
