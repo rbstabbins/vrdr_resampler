@@ -1,4 +1,4 @@
-# VRDR Resampler for CaSSIS
+# VRDR Resampler
 
 ![MC18 PAN vs NPB](/mc18_pan_npb.png)
 The entire MC18 quadrant resampled to CaSSIS NPB (top right) and PAN (bottom left) browse products. Learn more about Mars through the colours of CaSSIS [here](https://www.esa.int/Science_Exploration/Human_and_Robotic_Exploration/Exploration/ExoMars/Red_Mars_blue_Mars_through_the_eye_of_a_Mars-orbiting_camera).
