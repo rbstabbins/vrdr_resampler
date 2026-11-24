@@ -1,4 +1,4 @@
-# VRDR Resampler
+# VRDR Resampler for CaSSIS
 
 ![MC18 PAN vs NPB](/mc18_pan_npb.png)
 The entire MC18 quadrant resampled to CaSSIS NPB (top right) and PAN (bottom left) browse products. Learn more about Mars through the colours of CaSSIS [here](https://www.esa.int/Science_Exploration/Human_and_Robotic_Exploration/Exploration/ExoMars/Red_Mars_blue_Mars_through_the_eye_of_a_Mars-orbiting_camera).
@@ -12,13 +12,15 @@ The entire MC18 quadrant resampled to CaSSIS NPB (top right) and PAN (bottom lef
 
 ## About <a name = "about"></a>
 
-This is a simple Python module for resampling the CRISM VRDR dataset, of hyperspectral visible-to-near-infrared observations of Mars at a 90 m/px resolution, to the spectral sampling of another instrument.
+This is a simple Python module for resampling the CRISM VRDR dataset, of hyperspectral visible-to-near-infrared observations of Mars at a 90 m/px resolution, to the spectral sampling of the CaSSIS multispectral imager.
 
 You can find out more about the CRISM VRDR dataset here: [CRISM VRDR](https://ode.rsl.wustl.edu/Venus/pagehelp/Content/Missions_Instruments/Mars%20Reconnaissance%20Orbiter%20(MRO)/CRISM/CRISM%20Product%20Primer/CRISM%20VRDR.htm).
 
-Here is the official DOI of the dataset: [10.17189/tt67-sj14](https://pds.nasa.gov/ds-view/pds/viewDataset.jsp?dsid=MRO-M-CRISM-5-RDR-VNIRHYPERSPECTRAL-V1.0).
+Here is the official DOI of the VRDR dataset: [10.17189/tt67-sj14](https://pds.nasa.gov/ds-view/pds/viewDataset.jsp?dsid=MRO-M-CRISM-5-RDR-VNIRHYPERSPECTRAL-V1.0).
 
-This module has been used to construct the CaSSIS-VRDR-Resampled Dataset, that will be launched soon.
+This module has been used to construct the CaSSIS-VRDR-Resampled Dataset ("CaRDR"), available at the [Natural History Museum Data Portal](https://doi.org/10.5519/tbyp7pu2), and as described by [McNeil & Stabbins (2026)](https://doi.org/10.1029/2026EA005243).
+
+This dataset provides a near-global view of Mars as seen through the CaSSIS spectral channels (BLU, PAN, RED, NIR). The dataset mirrors the VRDR arrangement, by Mars quadrant, and then by individual tiles within each quadrant. All georeferencing and metadata of the original VRDR dataset is preserved in the resampling process. We provide the CaSSIS resampled products (I/F 4-band float cubes, spectral parameter ratio cubes, and 1% linear stretch 24-bit colour browse products) as geotiffs.
 
 ## Getting Started <a name = "getting_started"></a>
 
@@ -57,15 +59,15 @@ At the end of the notebook, a cell is provided that runs the outlined steps iter
 
 Note that sufficient storage is required to host the processed products, of ~33 Gb per quadrant, or ~1 Tb in total.
 
-A final notebook cell is given that finds quadrant-wide browse product stretch parameters, and applies these to produce a further set of browse products. This allows for an entire quadrant of tiles to be laoded into a GIS suite with preset stretch parameters that minimise brightness offsets between neighbouring tiles. The example image in this readme is an example of such a set of browse products.
+A final notebook cell is given that finds quadrant-wide browse product stretch parameters, and applies these to produce a further set of browse products. This allows for an entire quadrant of tiles to be loaded into a GIS suite with preset stretch parameters that minimise brightness offsets between neighbouring tiles. The example image in this readme is an example of such a set of browse products.
 
 ## Usage <a name = "usage"></a>
 
 As of 11/11/2025, we have downloaded the entire VRDR dataset and have batch-processed most of it to the CaSSIS profiles.
 
-The CaSSIS-resampled data products will be made available soon.
+The CaSSIS-resampled data products are available at the [Natural History Museum Data Portal](https://doi.org/10.5519/tbyp7pu2).
 
-We have plans to run the code on other VNIR instrument responses, e.g. OROCHI for MMX.
+We have plans to run the code on other VNIR instrument responses, e.g. HRSC for Mars Express, OROCHI for MMX.
 
 If you would like help resampling to another VNIR instrument, feel free to get in touch.
 
