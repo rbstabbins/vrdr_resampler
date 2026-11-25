@@ -12,7 +12,9 @@ The entire MC18 quadrant resampled to CaSSIS NPB (top right) and PAN (bottom lef
 
 ## About <a name = "about"></a>
 
-This is a simple Python module for resampling the CRISM VRDR dataset, of hyperspectral visible-to-near-infrared observations of Mars at a 90 m/px resolution, to the spectral sampling of the CaSSIS multispectral imager.
+This is a simple Python module for resampling the CRISM VRDR dataset, of hyperspectral visible-to-near-infrared (VNIR) observations of Mars at a 90 m/px resolution, to the spectral sampling of the another VNIR multispectral imager, given it's spectral response.
+
+The V1.0.0 release supported the ESA TGO CaSSIS imager only. This update now supports the MMX OROCHI imager as well.
 
 You can find out more about the CRISM VRDR dataset here: [CRISM VRDR](https://ode.rsl.wustl.edu/Venus/pagehelp/Content/Missions_Instruments/Mars%20Reconnaissance%20Orbiter%20(MRO)/CRISM/CRISM%20Product%20Primer/CRISM%20VRDR.htm).
 
@@ -21,6 +23,13 @@ Here is the official DOI of the VRDR dataset: [10.17189/tt67-sj14](https://pds.n
 This module has been used to construct the CaSSIS-VRDR-Resampled Dataset ("CaRDR"), available at the [Natural History Museum Data Portal](https://doi.org/10.5519/tbyp7pu2), and as described by [McNeil & Stabbins (2026)](https://doi.org/10.1029/2026EA005243).
 
 This dataset provides a near-global view of Mars as seen through the CaSSIS spectral channels (BLU, PAN, RED, NIR). The dataset mirrors the VRDR arrangement, by Mars quadrant, and then by individual tiles within each quadrant. All georeferencing and metadata of the original VRDR dataset is preserved in the resampling process. We provide the CaSSIS resampled products (I/F 4-band float cubes, spectral parameter ratio cubes, and 1% linear stretch 24-bit colour browse products) as geotiffs.
+
+This new update is being used to produce an OROCHI-view near-global Mars dataset.
+
+## Release History
+
+- **V1.0.0**: Initial release supporting the ESA TGO CaSSIS imager.
+- **V1.1.0**: Pending. Added support for the MMX OROCHI imager, including OROCHI-specific spectral parameters and spatial downsampling to 2.4 km/pix resolution.
 
 ## Getting Started <a name = "getting_started"></a>
 
@@ -40,9 +49,11 @@ conda env create -f environment.yml
 
 from within the downloaded `vrdr_resampler` directory.
 
-### Running the Notebook Example
+## Running the Notebooks
 
 The main resampling code is in the `vrdr_resampler.py` module.
+
+### CaSSIS Resampling
 
 The `vrdr_resampler_cassis.ipynb` provides a walk-through for using the module to perform resampling to the CaSSIS filter profiles. These are provided in the `instrument_response` directory. The data has been digitised from [Pommerol et al 2022](https://doi.org/10.1016/j.pss.2022.105580). The notebook also uses the `cassis_products.py` module, that provides CaSSIS-specific functions for producing browse products and spectral parameters (summary products) and colour composite products.
 
@@ -60,6 +71,12 @@ At the end of the notebook, a cell is provided that runs the outlined steps iter
 Note that sufficient storage is required to host the processed products, of ~33 Gb per quadrant, or ~1 Tb in total.
 
 A final notebook cell is given that finds quadrant-wide browse product stretch parameters, and applies these to produce a further set of browse products. This allows for an entire quadrant of tiles to be loaded into a GIS suite with preset stretch parameters that minimise brightness offsets between neighbouring tiles. The example image in this readme is an example of such a set of browse products.
+
+### OROCHI Resampling
+
+The OROCHI resampling notebook (`vrdr_resampler_orochi.ipynb`) operates in the same way as the above CaSSIS notebook. Aside from accessing the OROCHI spectral response (rather than the CaSSIS response), and the use of OROCHI-specific spectral parameters (via the new `orochi_products.py`) module, the key difference is that the processing spatially downsamples the VRDR 90 m/pix data to the OROCHI resolution of 2.4 km/pix.
+
+To do is definition of new OROCHI spectral parameters of use for this scale of dataset.
 
 ## Usage <a name = "usage"></a>
 
